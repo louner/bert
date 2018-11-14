@@ -395,6 +395,10 @@ def convert_single_example(ex_index, example, label_list, max_seq_length,
   # For classification tasks, the first vector (corresponding to [CLS]) is
   # used as as the "sentence vector". Note that this only makes sense because
   # the entire model is fine-tuned.
+  tokens_a = ['[CLS]'] + tokens_a
+  tokens_b = ['[CLS]'] + tokens_b
+
+  '''
   tokens = []
   segment_ids = []
   tokens.append("[CLS]")
@@ -411,24 +415,28 @@ def convert_single_example(ex_index, example, label_list, max_seq_length,
       segment_ids.append(1)
     tokens.append("[SEP]")
     segment_ids.append(1)
+  '''
 
-  input_ids = tokenizer.convert_tokens_to_ids(tokens)
+  #input_ids = tokenizer.convert_tokens_to_ids(tokens)
+  input_ids = [tokenizer.convert_tokens_to_ids(tokens) for tokens in [tokens_a, tokens_b]]
 
   # The mask has 1 for real tokens and 0 for padding tokens. Only real
   # tokens are attended to.
-  input_mask = [1] * len(input_ids)
+  input_masks = [[1] * len(input_id) for input_id in input_ids]
 
   # Zero-pad up to the sequence length.
-  while len(input_ids) < max_seq_length:
-    input_ids.append(0)
-    input_mask.append(0)
-    segment_ids.append(0)
+  for i in range(2):
+    while len(input_ids[i]) < max_seq_length:
+      input_ids[i].append(0)
+      input_masks[i].append(0)
+      #segment_ids[i].append(0)
 
-  assert len(input_ids) == max_seq_length
-  assert len(input_mask) == max_seq_length
-  assert len(segment_ids) == max_seq_length
+    assert len(input_ids[i]) == max_seq_length
+    assert len(input_masks[i]) == max_seq_length
+  #assert len(segment_ids) == max_seq_length
 
   label_id = label_map[example.label]
+  '''
   if ex_index < 5:
     tf.logging.info("*** Example ***")
     tf.logging.info("guid: %s" % (example.guid))
@@ -438,11 +446,13 @@ def convert_single_example(ex_index, example, label_list, max_seq_length,
     tf.logging.info("input_mask: %s" % " ".join([str(x) for x in input_mask]))
     tf.logging.info("segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
     tf.logging.info("label: %s (id = %d)" % (example.label, label_id))
+  '''
 
   feature = InputFeatures(
       input_ids=input_ids,
       input_mask=input_mask,
-      segment_ids=segment_ids,
+      #segment_ids=segment_ids,
+      segment_ids=None,
       label_id=label_id)
   return feature
 
@@ -541,22 +551,24 @@ def _truncate_seq_pair(tokens_a, tokens_b, max_length):
 def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
                  labels, num_labels, use_one_hot_embeddings):
   """Creates a classification model."""
-  model = modeling.BertModel(
-      config=bert_config,
-      is_training=is_training,
-      input_ids=input_ids,
-      input_mask=input_mask,
-      token_type_ids=segment_ids,
-      use_one_hot_embeddings=use_one_hot_embeddings)
+  with tf.variable_scope('model'):
+    models = []
+    for i in range(2):
+      models.append(modeling.BertModel(
+          config=bert_config,
+          is_training=is_training,
+          input_ids=input_ids[i],
+          input_mask=input_mask[i],
+          token_type_ids=segment_ids,
+          use_one_hot_embeddings=use_one_hot_embeddings))
 
   # In the demo, we are doing a simple classification task on the entire
   # segment.
   #
   # If you want to use the token-level output, use model.get_sequence_output()
   # instead.
-  output_layer = model.get_pooled_output()
-
-  hidden_size = output_layer.shape[-1].value
+  sentence_outputs = [model.get_pooled_output().shape[-1].value for model in models]
+  distance = tf.norm(sentence_outputs[0]-sentence_outputs[1], ord=1, axis=1)
 
   output_weights = tf.get_variable(
       "output_weights", [num_labels, hidden_size],
@@ -568,7 +580,7 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
   with tf.variable_scope("loss"):
     if is_training:
       # I.e., 0.1 dropout
-      output_layer = tf.nn.dropout(output_layer, keep_prob=0.9)
+      distance = tf.nn.dropout(distance, keep_prob=0.9)
 
     logits = tf.matmul(output_layer, output_weights, transpose_b=True)
     logits = tf.nn.bias_add(logits, output_bias)
@@ -582,7 +594,6 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
 
     return (loss, per_example_loss, logits, probabilities)
 
-
 def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
                      num_train_steps, num_warmup_steps, use_tpu,
                      use_one_hot_embeddings):
@@ -595,9 +606,13 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
     for name in sorted(features.keys()):
       tf.logging.info("  name = %s, shape = %s" % (name, features[name].shape))
 
+    # input_ids = [sentence1_ids, sentence2_ids]
     input_ids = features["input_ids"]
+    # input_mask = [sentence1_mask, sentence2_mask]
     input_mask = features["input_mask"]
+
     segment_ids = features["segment_ids"]
+    segment_ids = None
     label_ids = features["label_ids"]
 
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)
