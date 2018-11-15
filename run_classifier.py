@@ -148,10 +148,11 @@ class InputExample(object):
 class InputFeatures(object):
   """A single set of features of data."""
 
-  def __init__(self, input_ids, input_mask, segment_ids, label_id):
-    self.input_ids = input_ids
-    self.input_mask = input_mask
-    self.segment_ids = segment_ids
+  def __init__(self, input_ids_1, input_ids_2, input_mask_1, input_mask_2, label_id):
+    self.input_ids_1 = input_ids_1
+    self.input_ids_2 = input_ids_2
+    self.input_mask_1 = input_mask_1
+    self.input_mask_2 = input_mask_2
     self.label_id = label_id
 
 
@@ -449,10 +450,10 @@ def convert_single_example(ex_index, example, label_list, max_seq_length,
   '''
 
   feature = InputFeatures(
-      input_ids=input_ids,
-      input_mask=input_mask,
-      #segment_ids=segment_ids,
-      segment_ids=None,
+      input_ids_1=input_ids[0],
+      input_ids_2=input_ids[1],
+      input_mask_1=input_masks[0],
+      input_mask_2=input_masks[1],
       label_id=label_id)
   return feature
 
@@ -475,9 +476,10 @@ def file_based_convert_examples_to_features(
       return f
 
     features = collections.OrderedDict()
-    features["input_ids"] = create_int_feature(feature.input_ids)
-    features["input_mask"] = create_int_feature(feature.input_mask)
-    features["segment_ids"] = create_int_feature(feature.segment_ids)
+    features["input_ids_1"] = create_int_feature(feature.input_ids_1)
+    features["input_ids_2"] = create_int_feature(feature.input_ids_2)
+    features["input_mask_1"] = create_int_feature(feature.input_mask_1)
+    features["input_mask_2"] = create_int_feature(feature.input_mask_2)
     features["label_ids"] = create_int_feature([feature.label_id])
 
     tf_example = tf.train.Example(features=tf.train.Features(feature=features))
@@ -489,9 +491,10 @@ def file_based_input_fn_builder(input_file, seq_length, is_training,
   """Creates an `input_fn` closure to be passed to TPUEstimator."""
 
   name_to_features = {
-      "input_ids": tf.FixedLenFeature([seq_length], tf.int64),
-      "input_mask": tf.FixedLenFeature([seq_length], tf.int64),
-      "segment_ids": tf.FixedLenFeature([seq_length], tf.int64),
+      "input_ids_1": tf.FixedLenFeature([seq_length], tf.int64),
+      "input_ids_2": tf.FixedLenFeature([seq_length], tf.int64),
+      "input_mask_1": tf.FixedLenFeature([seq_length], tf.int64),
+      "input_mask_2": tf.FixedLenFeature([seq_length], tf.int64),
       "label_ids": tf.FixedLenFeature([], tf.int64),
   }
 
@@ -567,8 +570,10 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
   #
   # If you want to use the token-level output, use model.get_sequence_output()
   # instead.
-  sentence_outputs = [model.get_pooled_output().shape[-1].value for model in models]
-  distance = tf.norm(sentence_outputs[0]-sentence_outputs[1], ord=1, axis=1)
+  sentence_outputs = [model.pooled_output for model in models]
+
+  output_layer = tf.square(sentence_outputs[0]-sentence_outputs[1])
+  hidden_size = models[0].get_pooled_output().shape[-1].value
 
   output_weights = tf.get_variable(
       "output_weights", [num_labels, hidden_size],
@@ -580,7 +585,7 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
   with tf.variable_scope("loss"):
     if is_training:
       # I.e., 0.1 dropout
-      distance = tf.nn.dropout(distance, keep_prob=0.9)
+      output_layer = tf.nn.dropout(output_layer, keep_prob=0.9)
 
     logits = tf.matmul(output_layer, output_weights, transpose_b=True)
     logits = tf.nn.bias_add(logits, output_bias)
@@ -607,11 +612,10 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
       tf.logging.info("  name = %s, shape = %s" % (name, features[name].shape))
 
     # input_ids = [sentence1_ids, sentence2_ids]
-    input_ids = features["input_ids"]
+    input_ids = [features["input_ids_1"], features["input_ids_2"]]
     # input_mask = [sentence1_mask, sentence2_mask]
-    input_mask = features["input_mask"]
+    input_mask = [features["input_mask_1"], features["input_mask_2"]]
 
-    segment_ids = features["segment_ids"]
     segment_ids = None
     label_ids = features["label_ids"]
 
@@ -622,6 +626,7 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
         num_labels, use_one_hot_embeddings)
 
     tvars = tf.trainable_variables()
+    tvars = [var for var in tvars if var.name.startswith('bert')]
 
     scaffold_fn = None
     if init_checkpoint:
@@ -688,13 +693,11 @@ def input_fn_builder(features, seq_length, is_training, drop_remainder):
 
   all_input_ids = []
   all_input_mask = []
-  all_segment_ids = []
   all_label_ids = []
 
   for feature in features:
     all_input_ids.append(feature.input_ids)
     all_input_mask.append(feature.input_mask)
-    all_segment_ids.append(feature.segment_ids)
     all_label_ids.append(feature.label_id)
 
   def input_fn(params):
@@ -714,11 +717,6 @@ def input_fn_builder(features, seq_length, is_training, drop_remainder):
         "input_mask":
             tf.constant(
                 all_input_mask,
-                shape=[num_examples, seq_length],
-                dtype=tf.int32),
-        "segment_ids":
-            tf.constant(
-                all_segment_ids,
                 shape=[num_examples, seq_length],
                 dtype=tf.int32),
         "label_ids":
