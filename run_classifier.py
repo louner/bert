@@ -566,14 +566,13 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
                 token_type_ids=segment_ids,
                 use_one_hot_embeddings=use_one_hot_embeddings))
 
-        for var in tf.global_variables():
-            print(var.name)
+    if FLAG.do_train:
         with tf.Session() as sess:
             tf.global_variables_initializer().run()
-            saver = tf.train.Saver(tf.global_variables())
+            bert_vars = [var for var in tf.global_variables() if var.name.startswith('bert')]
+            saver = tf.train.Saver(bert_vars)
             saver.restore(sess, init_checkpoint)
-
-
+    
 
     # In the demo, we are doing a simple classification task on the entire
     # segment.
@@ -916,7 +915,6 @@ def main(_):
                 drop_remainder=predict_drop_remainder)
 
         result = estimator.predict(input_fn=predict_input_fn)
-
         output_predict_file = os.path.join(FLAGS.output_dir, "test_results.tsv")
         with tf.gfile.GFile(output_predict_file, "w") as writer:
             tf.logging.info("***** Predict results *****")
