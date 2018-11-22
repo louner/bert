@@ -303,15 +303,18 @@ class MrpcProcessor(DataProcessor):
         for (i, line) in enumerate(lines):
             if i == 0:
                 continue
-            guid = "%s-%s" % (set_type, i)
-            text_a = tokenization.convert_to_unicode(line[3])
-            text_b = tokenization.convert_to_unicode(line[4])
-            if set_type == "test":
-                label = "0"
-            else:
-                label = tokenization.convert_to_unicode(line[0])
-            examples.append(
-                    InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
+            try:
+                guid = "%s-%s" % (set_type, i)
+                text_a = tokenization.convert_to_unicode(line[3])
+                text_b = tokenization.convert_to_unicode(line[4])
+                if set_type == "test":
+                    label = "0"
+                else:
+                    label = tokenization.convert_to_unicode(line[0])
+                examples.append(
+                        InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
+            except:
+                pass
         return examples
 
 
@@ -566,7 +569,7 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
                 token_type_ids=segment_ids,
                 use_one_hot_embeddings=use_one_hot_embeddings))
 
-    if FLAG.do_train:
+    if FLAGS.do_train:
         with tf.Session() as sess:
             tf.global_variables_initializer().run()
             bert_vars = [var for var in tf.global_variables() if var.name.startswith('bert')]
