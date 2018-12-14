@@ -1,13 +1,21 @@
 from run_classifier import *
 import numpy as np
 from IPython import display
+
+import logging
+handler = logging.FileHandler('log/lib.log', mode='w')
+handler.setFormatter(logging.Formatter('%(asctime)s %(message)s'))
+logger = logging.getLogger('lib')
+logger.setLevel(logging.DEBUG)
+logger.addHandler(handler)
+
 #import matplotlib.pyplot as plt
 
 bert_config_file = 'model/uncased_L-12_H-768_A-12/bert_config.json'
 train_tfrecord_fpath = '/tmp/mrpc_output/train.tf_record'
 eval_tfrecord_fpath = '/tmp/mrpc_output/eval.tf_record'
 is_training = True
-batch_size = 32
+batch_size = 64
 seq_length = 128
 num_labels = 2
 use_one_hot_embeddings = False
@@ -15,7 +23,7 @@ init_checkpoint = 'model/uncased_L-12_H-768_A-12/bert_model.ckpt'
 model_dir = 'model/model/'
 learning_rate = 5e-4
 num_train_steps = 10000000
-save_checkpoint_window = 100
+save_checkpoint_window = 2000
 
 def get_dataset(train_tfrecord_fpath, is_train):
     name_to_features = {
@@ -159,10 +167,11 @@ class Model:
             
             for step in range(num_train_steps):
                 out = sess.run([self.train_op, self.loss, self.accuracy], feed_dict={self.handle: train_batch})
-                print step, out
+                out[0] = step
+                logger.info(out)
                 
                 if step % save_checkpoint_window == 0:
-                    print 'saving %s/model_%d'%(model_dir, step)
+                    logger.info('saving %s/model_%d'%(model_dir, step))
                     tf.train.Saver().save(sess, '%s/model_%d'%(model_dir, step))
 
     def eval(self, model_fpath=model_dir):
@@ -175,7 +184,7 @@ class Model:
 
             eval_batch = sess.run(self.eval_batch_iter)
             metrics = evaluate(self.accuracy, {self.handle: eval_batch}, sess)
-            print metrics
+            print(metrics)
 
                     
 if __name__ == '__main__':
@@ -183,5 +192,5 @@ if __name__ == '__main__':
     model.is_training = False
     model.prepare_input()
     model.build_graph()
-    #model.train()
-    model.eval('model/model/model_0')
+    model.train()
+    #model.eval('model/model/model_0')
