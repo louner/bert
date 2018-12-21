@@ -471,8 +471,12 @@ def file_based_convert_examples_to_features(
         if ex_index % 10000 == 0:
             tf.logging.info("Writing example %d of %d" % (ex_index, len(examples)))
 
-        feature = convert_single_example(ex_index, example, label_list,
-                                                                         max_seq_length, tokenizer)
+        try:
+            feature = convert_single_example(ex_index, example, label_list,
+                                                                             max_seq_length, tokenizer)
+        except:
+            print('convert fail', ex_index, example)
+            continue
 
         def create_int_feature(values):
             f = tf.train.Feature(int64_list=tf.train.Int64List(value=list(values)))
@@ -857,7 +861,7 @@ def main(_):
                 seq_length=FLAGS.max_seq_length,
                 is_training=True,
                 drop_remainder=True)
-        estimator.train(input_fn=train_input_fn, max_steps=num_train_steps)
+        #estimator.train(input_fn=train_input_fn, max_steps=num_train_steps)
 
     if FLAGS.do_eval:
         eval_examples = processor.get_dev_examples(FLAGS.data_dir)
