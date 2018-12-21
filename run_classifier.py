@@ -301,7 +301,20 @@ class MrpcProcessor(DataProcessor):
         """Creates examples for the training and dev sets."""
         examples = []
         for (i, line) in enumerate(lines):
-            if i == 0:
+            try:
+                if i == 0:
+                    continue
+                guid = "%s-%s" % (set_type, i)
+                text_a = tokenization.convert_to_unicode(line[3])
+                text_b = tokenization.convert_to_unicode(line[4])
+                if set_type == "test":
+                    label = "0"
+                else:
+                    label = tokenization.convert_to_unicode(line[0])
+                examples.append(
+                        InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
+            except:
+                print(line)
                 continue
             try:
                 guid = "%s-%s" % (set_type, i)
@@ -472,10 +485,9 @@ def file_based_convert_examples_to_features(
             tf.logging.info("Writing example %d of %d" % (ex_index, len(examples)))
 
         try:
-            feature = convert_single_example(ex_index, example, label_list,
-                                                                             max_seq_length, tokenizer)
+            feature = convert_single_example(ex_index, example, label_list, max_seq_length, tokenizer)
         except:
-            print('convert fail', ex_index, example)
+            print(example)
             continue
 
         def create_int_feature(values):
@@ -613,7 +625,9 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
         per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1)
         loss = tf.reduce_mean(per_example_loss)
 
-        return (loss, per_example_loss, logits, probabilities)
+        tvars = [output_weights, output_bias]
+
+        return (loss, per_example_loss, logits, probabilities, tvars)
 
 def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
                                          num_train_steps, num_warmup_steps, use_tpu,
@@ -637,7 +651,7 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
 
         is_training = (mode == tf.estimator.ModeKeys.TRAIN)
 
-        (total_loss, per_example_loss, logits, probabilities) = create_model(
+        (total_loss, per_example_loss, logits, probabilities, tvars) = create_model(
                 bert_config, is_training, input_ids, input_mask, segment_ids, label_ids,
                 num_labels, use_one_hot_embeddings, init_checkpoint)
 
@@ -668,9 +682,8 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
 
         output_spec = None
         if mode == tf.estimator.ModeKeys.TRAIN:
-
             train_op = optimization.create_optimizer(
-                    total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu)
+                    total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu, tvars)
 
             output_spec = tf.contrib.tpu.TPUEstimatorSpec(
                     mode=mode,
